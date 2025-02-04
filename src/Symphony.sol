@@ -9,12 +9,12 @@ import "./contracts/utils/Math.sol";
 import "./contracts/interfaces/IVaultMinimal.sol";
 
 /**
- * @title Torii Contract
- * @dev The Torii contract allows users to perform token swaps the most liquid DEXes.
+ * @title Symphony Contract
+ * @dev The Symphony contract allows users to perform token swaps the most liquid DEXes.
  * It provides functions for approving tokens, executing swaps, and handling token transfers.
  * The contract also includes reentrancy guard, contract error handling, and ownership functionality.
  */
-contract Torii is ReentrancyGuard, ContractErrors, Ownable {
+contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
     using Math for uint;
     event SwapExecuted(
         address indexed user,
