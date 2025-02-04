@@ -6,14 +6,15 @@ import "./contracts/interfaces/Interfaces.sol";
 import "./contracts/core/ContractErrors.sol";
 import "./contracts/utils/Ownable.sol";
 import "./contracts/utils/Math.sol";
+import "./contracts/interfaces/IVaultMinimal.sol";
 
 /**
- * @title Fold Contract
- * @dev The Fold contract allows users to perform token swaps using the IDonkeRouter, IYakaRouter and IDragonRouter interfaces.
+ * @title Torii Contract
+ * @dev The Torii contract allows users to perform token swaps the most liquid DEXes.
  * It provides functions for approving tokens, executing swaps, and handling token transfers.
  * The contract also includes reentrancy guard, contract error handling, and ownership functionality.
  */
-contract Seiyan is ReentrancyGuard, ContractErrors, Ownable {
+contract Torii is ReentrancyGuard, ContractErrors, Ownable {
     using Math for uint;
     event SwapExecuted(
         address indexed user,
@@ -25,7 +26,7 @@ contract Seiyan is ReentrancyGuard, ContractErrors, Ownable {
     );
     event PathsExecuted(
         address indexed user,
-        Params.SwapParam[] swapParams,
+        Params.SwapParam[][] swapParams,
         uint minTotalAmountOut,
         uint finalTokenAmount
     );
@@ -38,7 +39,16 @@ contract Seiyan is ReentrancyGuard, ContractErrors, Ownable {
         0x9f3B1c6b0CDDfE7ADAdd7aadf72273b38eFF0ebC;
     IDonkeRouter donkeRouter;
     address public donkeRouterAddress =
-        0x9f3B1c6b0CDDfE7ADAdd7aadf72273b38eFF0ebC;
+        0x6e8D0B4EBe31C334D53ff7EB08722a4941049070;
+    IVault jellyVault;
+    address public jellyVaultAddress =
+        0xFB43069f6d0473B85686a85F4Ce4Fc1FD8F00875;
+    IUniversalRouter universalRouter;
+    address public universalRouterAddress =
+        0xa683c66045ad16abb1bCE5ad46A64d95f9A25785;
+    mapping(uint => address) public v3Routers;
+    uint24[] public routerKeys = [6,7];
+
 
     //CHANGE
     address public fee_address = 0xa2a9dd657D44e46E2d1843B8784eFc3dE3Cf3A57;
@@ -50,11 +60,17 @@ contract Seiyan is ReentrancyGuard, ContractErrors, Ownable {
         dragonRouter = IDragonRouter(dragonRouterAddress);
         yakaRouter = IYakaRouter(yakaRouterAddress);
         donkeRouter = IDonkeRouter(donkeRouterAddress);
+        jellyVault = IVault(jellyVaultAddress);
+        universalRouter = IUniversalRouter(universalRouterAddress);
+        v3Routers[6] = 0x11DA6463D6Cb5a03411Dbf5ab6f6bc3997Ac7428;
+        v3Routers[7] = 0xd1EFe48B71Acd98Db16FcB9E7152B086647Ef544;
         weth = IWETH(wethAddress);
     }
 
     /**
-     * @notice Sets the maximum allowances for the specified tokens to the syncRouter,horizonrouter and dragonRouter addresses.
+        routers[6] = 0x11DA6463D6Cb5a03411Dbf5ab6f6bc3997Ac7428;
+        routers[7] = 0xd1EFe48B71Acd98Db16FcB9E7152B086647Ef544;
+    }
      * @dev Only the contract owner can call this function.
      * @param tokens Array of token addresses.
      */
@@ -67,11 +83,20 @@ contract Seiyan is ReentrancyGuard, ContractErrors, Ownable {
                 revert ApprovalFailedError(tokens[i], dragonRouterAddress);
             if (!token.approve(yakaRouterAddress, type(uint96).max))
                 revert ApprovalFailedError(tokens[i], yakaRouterAddress);
+            if (!token.approve(jellyVaultAddress, type(uint96).max))
+                revert ApprovalFailedError(tokens[i], jellyVaultAddress);
+            if (!token.approve(universalRouterAddress, type(uint96).max))
+                revert ApprovalFailedError(tokens[i], universalRouterAddress);
+            for (uint j = 0; j < routerKeys.length; j++) {
+                if (!token.approve(v3Routers[routerKeys[j]], type(uint96).max))
+                    revert ApprovalFailedError(tokens[i], v3Routers[routerKeys[j]]);
+            }
+            
         }
     }
 
     /**
-     * @notice Revokes the allowances for the specified tokens from the syncRouter,horizonrouter and dragonRouter addresses.
+     * @notice Revokes the allowances for the specified tokens from the routers.
      * @dev Only the contract owner can call this function.
      * @param tokens Array of token addresses.
      */
@@ -87,6 +112,23 @@ contract Seiyan is ReentrancyGuard, ContractErrors, Ownable {
                 );
             if (!token.approve(yakaRouterAddress, 0))
                 revert RevokeApprovalFailedError(tokens[i], yakaRouterAddress);
+            if (!token.approve(jellyVaultAddress, 0))
+                revert RevokeApprovalFailedError(
+                    tokens[i],
+                    jellyVaultAddress
+                );
+            if (!token.approve(universalRouterAddress, 0))
+                revert RevokeApprovalFailedError(
+                    tokens[i],
+                    universalRouterAddress
+                );
+            for (uint j = 0; j < routerKeys.length; j++) {
+                if (!token.approve(v3Routers[routerKeys[j]], 0))
+                    revert RevokeApprovalFailedError(
+                        tokens[i],
+                        v3Routers[routerKeys[j]]
+                    );
+            }
         }
     }
 
@@ -190,9 +232,14 @@ contract Seiyan is ReentrancyGuard, ContractErrors, Ownable {
         address tokenOut,
         uint amountIn
     ) internal returns (IPool.TokenAmount memory) {
-        address[] memory path = new address[](2);
-        path[0] = tokenIn;
-        path[1] = tokenOut;
+        route[] memory path = new route[](1);
+        path[0] = route({
+            from: tokenIn, // Replace with actual address
+            to: tokenOut, // Replace with actual address
+            stable: false  // Set the boolean value
+        });
+
+        
         uint deadline = block.timestamp + 20 minutes;
         uint[] memory amounts = yakaRouter.swapExactTokensForTokens(
             amountIn,
@@ -232,7 +279,7 @@ contract Seiyan is ReentrancyGuard, ContractErrors, Ownable {
         path[0] = tokenIn;
         path[1] = tokenOut;
         uint deadline = block.timestamp + 20 minutes;
-        uint[] memory amounts = dragonRouter.swapExactTokensForTokens(
+        uint[] memory amounts = donkeRouter.swapExactTokensForTokens(
             amountIn,
             0,
             path,
@@ -254,63 +301,204 @@ contract Seiyan is ReentrancyGuard, ContractErrors, Ownable {
         return tokenOutAmount;
     }
 
+    function jellySwap(
+        address tokenIn,
+        address tokenOut,
+        bytes32 poolId,
+        uint256 amountIn
+    ) internal returns (IPool.TokenAmount memory) {
+        
+        IVault.SingleSwap memory singleSwap = IVault.SingleSwap({
+            poolId: poolId,
+            kind: IVault.SwapKind.GIVEN_IN,
+            assetIn: IAsset(tokenIn),
+            assetOut: IAsset(tokenOut),
+            amount: amountIn,
+            userData: ""
+        });
+        IVault.FundManagement memory funds = IVault.FundManagement({
+            sender: address(this),
+            fromInternalBalance: false,
+            recipient: payable(address(this)),
+            toInternalBalance: false
+        });
+        uint256 limit = 0;
+        uint256 deadline = block.timestamp + 20 minutes;
+        uint256 amountOut = jellyVault.swap(singleSwap, funds, limit, deadline);
+
+        IPool.TokenAmount memory tokenOutAmount;
+        tokenOutAmount.token = tokenOut;
+        tokenOutAmount.amount = amountOut;
+        emit SwapExecuted(
+            msg.sender,
+            tokenIn,
+            tokenOut,
+            amountIn,
+            amountOut,
+            4
+        );
+        return tokenOutAmount;
+    }
+
+    function uniswapV3Swap(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint24 fee
+    ) internal returns (IPool.TokenAmount memory) {
+        // Prepare the commands for the Universal Router
+        IERC20(tokenIn).transfer(address(universalRouter), amountIn);
+        bytes memory commands = abi.encodePacked(
+            uint8(0x00) // V3_SWAP_EXACT_IN command
+        );
+
+        // Prepare the swap data
+        bytes memory swapData = abi.encode(
+            address(this), // recipient
+            amountIn, // amountIn
+            0, // amountOutMinimum
+            abi.encodePacked(tokenIn, fee, tokenOut), // path
+            false
+        );
+
+        // Prepare the inputs array
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = swapData;
+
+        // Record the balance before the swap
+        uint256 balanceBefore = IERC20(tokenOut).balanceOf(address(this));
+
+        // Execute the swap using the Universal Router interface
+        universalRouter.execute(commands, inputs);
+
+        // Calculate the amount received
+        uint256 balanceAfter = IERC20(tokenOut).balanceOf(address(this));
+        uint256 amountOut = balanceAfter - balanceBefore;
+
+        IPool.TokenAmount memory tokenOutAmount;
+        tokenOutAmount.token = tokenOut;
+        tokenOutAmount.amount = amountOut;
+
+        emit SwapExecuted(msg.sender, tokenIn, tokenOut, amountIn, amountOut, 5);
+
+        return tokenOutAmount;
+    }
+
+    function uniswapV3ExactInputSingle(
+        IUniswapV3SwapRouter uniswapV3SwapRouter,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint24 fee
+    ) internal returns (IPool.TokenAmount memory) {
+        IUniswapV3SwapRouter.ExactInputSingleParams memory params = IUniswapV3SwapRouter.ExactInputSingleParams({
+            tokenIn: tokenIn,
+            tokenOut: tokenOut,
+            fee: fee,
+            recipient: address(this),
+            amountIn: amountIn,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0 // No price limit
+        });
+
+        uint256 amountOut = uniswapV3SwapRouter.exactInputSingle(params);
+
+        IPool.TokenAmount memory tokenOutAmount;
+        tokenOutAmount.token = tokenOut;
+        tokenOutAmount.amount = amountOut;
+
+        emit SwapExecuted(msg.sender, tokenIn, tokenOut, amountIn, amountOut, 6);
+
+        return tokenOutAmount;
+    }
+
     /**
      * @notice Executes a series of swap operations based on the provided swapParams.
-     * @dev This function performs chained swaps using syncswap, horizondex and dragonSwap functions.
+     * @dev This function performs chained swaps dragonSwap functions.
      * @param swapParams Array of SwapParam structures containing swap details.
      * @param minTotalAmountOut Minimum total amount of output token expected.
      */
     function executeSwaps(
-        Params.SwapParam[] memory swapParams,
+        Params.SwapParam[][] memory swapParams,
         uint minTotalAmountOut,
         bool conveth
     ) external payable nonReentrant returns (uint) {
-        address tokenG = swapParams[0].tokenIn;
+        address tokenG = swapParams[0][0].tokenIn;
         IERC20 token = IERC20(tokenG);
-        uint256 amountIn = swapParams[0].amountIn;
+        uint256 totalAmountIn = 0;
+        for (uint i = 0; i < swapParams.length; i++){
+            totalAmountIn += swapParams[i][0].amountIn;
+        }
         if (msg.value > 0) {
             weth.deposit{value: msg.value}();
-            amountIn = msg.value*10**12;
+            totalAmountIn = msg.value;
         } else {
-            if (!token.transferFrom(msg.sender, address(this), amountIn))
+            if (!token.transferFrom(msg.sender, address(this), totalAmountIn))
                 revert TransferFromFailedError(
                     msg.sender,
                     address(this),
-                    amountIn
+                    totalAmountIn
                 );
-        }
+        } 
         address finalTokenAddress;
         uint finalTokenAmount;
         for (uint i = 0; i < swapParams.length; i++) {
-            Params.SwapParam memory param = swapParams[i];
-            if (param.swapType == 1) {
-                IPool.TokenAmount memory result = dragonSwap(
-                    param.tokenIn,
-                    param.tokenOut,
-                    amountIn
-                );
-                finalTokenAddress = result.token;
-                finalTokenAmount = result.amount;
-            } else if (param.swapType == 2) {
-                IPool.TokenAmount memory result = yakaSwap(
-                    param.tokenIn,
-                    param.tokenOut,
-                    amountIn
-                );
-                finalTokenAddress = result.token;
-                finalTokenAmount = result.amount;
-            } else if (param.swapType == 3) {
-                IPool.TokenAmount memory result = donkeSwap(
-                    param.tokenIn,
-                    param.tokenOut,
-                    amountIn
-                );
-                finalTokenAddress = result.token;
-                finalTokenAmount = result.amount;
-            } else {
-                revert("Invalid swap type");
+            uint amountInCurrent = swapParams[i][0].amountIn;
+            address pathFinalTokenAddress;
+            uint pathFinalTokenAmount;
+            for (uint j = 0; j < swapParams[i].length; j++) {
+                Params.SwapParam memory param = swapParams[i][j];
+                IPool.TokenAmount memory result;
+                if (param.swapType == 1) {
+                    result = dragonSwap(
+                        param.tokenIn,
+                        param.tokenOut,
+                        amountInCurrent
+                    );
+                } else if (param.swapType == 2) {
+                    result = yakaSwap(
+                        param.tokenIn,
+                        param.tokenOut,
+                        amountInCurrent
+                    );
+                } else if (param.swapType == 3) {
+                    result = donkeSwap(
+                        param.tokenIn,
+                        param.tokenOut,
+                        amountInCurrent
+                    );
+                } else if (param.swapType == 4){
+                    result = jellySwap(
+                        param.tokenIn,
+                        param.tokenOut,
+                        param.poolAddress,
+                        amountInCurrent
+                    );
+                }else if(param.swapType == 5){
+                    result = uniswapV3Swap(
+                        param.tokenIn,
+                        param.tokenOut,
+                        amountInCurrent,
+                        param.fee
+                    );
+                }else if (checkRouter(param.swapType)) {
+                    IUniswapV3SwapRouter uniswapV3SwapRouter = IUniswapV3SwapRouter(v3Routers[param.swapType]);
+                    result = uniswapV3ExactInputSingle(
+                        uniswapV3SwapRouter,
+                        param.tokenIn,
+                        param.tokenOut,
+                        amountInCurrent,
+                        param.fee
+                    );
+                } else {
+                    revert("Invalid swap type");
+                }
+                amountInCurrent = result.amount; // Update for next swap in path
+                pathFinalTokenAddress = result.token;
+                pathFinalTokenAmount = result.amount;
             }
-            amountIn = finalTokenAmount;
+            finalTokenAddress = pathFinalTokenAddress;
+            finalTokenAmount += pathFinalTokenAmount;
         }
         if (finalTokenAmount < minTotalAmountOut)
             revert AmountLessThanMinRequiredError(
@@ -355,6 +543,18 @@ contract Seiyan is ReentrancyGuard, ContractErrors, Ownable {
             );
             return amountToTransfer;
         }
+    }
+
+    function bytes32ToAddress(bytes32 b) pure internal returns (address) {
+        return address(uint160(uint256(b)));
+    }
+
+    function addressToBytes32(address a) pure internal returns (bytes32) {
+        return bytes32(uint256(uint160(a)));
+    }
+
+    function checkRouter(uint routerKey) internal view returns (bool) {
+        return abi.encodePacked(v3Routers[routerKey]).length > 0 ? true : false;
     }
 
     receive() external payable {}
