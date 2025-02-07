@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.4;
 
-import "./contracts/utils/ReentrancyGuard.sol";
 import "./contracts/interfaces/Interfaces.sol";
 import "./contracts/core/ContractErrors.sol";
-import "./contracts/utils/Ownable.sol";
-import "./contracts/utils/Math.sol";
 import "./contracts/interfaces/IVaultMinimal.sol";
+
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title Symphony Contract
@@ -29,6 +31,16 @@ contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
         Params.SwapParam[][] swapParams,
         uint minTotalAmountOut,
         uint finalTokenAmount
+    );
+    event SwapReceipt(
+        address indexed user,
+        address tokenIn,
+        address tokenOut,
+        uint amountIn,
+        uint amountOut,
+        uint feePercentage,
+        uint feeShare,
+        address feeRecipient
     );
 
     IDragonRouter dragonRouter;
@@ -421,7 +433,8 @@ contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
     function executeSwaps(
         Params.SwapParam[][] memory swapParams,
         uint minTotalAmountOut,
-        bool conveth
+        bool conveth,
+        FeeParams memory feeData
     ) external payable nonReentrant returns (uint) {
         address tokenG = swapParams[0][0].tokenIn;
         IERC20 token = IERC20(tokenG);
@@ -506,10 +519,15 @@ contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
                 minTotalAmountOut
             );
         IERC20 finalToken = IERC20(finalTokenAddress);
-        uint fee = (finalTokenAmount * feePercentage) / 1000;
-        uint amountToTransfer = finalTokenAmount - fee;
-        if (!finalToken.transfer(fee_address, fee))
-            revert TransferFailedError(finalTokenAddress, fee_address, fee);
+        // Toplam çıkış hesaplamasından sonra:
+        uint amountToTransfer  = _processFee(
+            totalAmountIn,
+            finalTokenAmount,
+            tokenG,
+            finalTokenAddress,
+            feeData
+        );
+
         if (conveth && finalTokenAddress == wethAddress) {
             weth.withdraw(amountToTransfer);
             (bool success, ) = msg.sender.call{value: amountToTransfer}("");
@@ -543,6 +561,52 @@ contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
             );
             return amountToTransfer;
         }
+    }
+
+    function _processFee(
+        uint totalAmountIn,
+        uint finalTokenAmount,
+        address tokenG,
+        address finalTokenAddress,
+        FeeParams memory feeData
+    ) internal returns (uint) {
+        uint amountToTransfer;
+        uint fee;
+        if (feeData.feeAddress != address(0)){
+            fee = (finalTokenAmount * feeData.paramFee) / 1000;
+            uint feeShare = (fee * feeData.feeSharePercentage) / 1000;
+            amountToTransfer = finalTokenAmount - fee;
+            if (!IERC20(finalTokenAddress).transfer(fee_address, fee - feeShare))
+                revert TransferFailedError(finalTokenAddress, fee_address, fee - feeShare );
+            if (!IERC20(finalTokenAddress).transfer(feeData.feeAddress, feeShare))
+                revert TransferFailedError(finalTokenAddress, feeData.feeAddress, feeShare);
+            emit SwapReceipt(
+                msg.sender,
+                tokenG,
+                finalTokenAddress,
+                totalAmountIn,
+                finalTokenAmount,
+                feePercentage,
+                fee,
+                feeData.feeAddress
+            );
+        }else {
+            fee = (finalTokenAmount * feePercentage) / 1000;
+            amountToTransfer = finalTokenAmount - fee;
+            if (!IERC20(finalTokenAddress).transfer(fee_address, fee))
+                revert TransferFailedError(finalTokenAddress, fee_address, fee);
+            emit SwapReceipt(
+                msg.sender,
+                tokenG,
+                finalTokenAddress,
+                totalAmountIn,
+                finalTokenAmount,
+                feePercentage,
+                fee,
+                fee_address
+            );
+        }
+        return amountToTransfer;
     }
 
     function bytes32ToAddress(bytes32 b) pure internal returns (address) {
