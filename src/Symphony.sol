@@ -9,6 +9,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title Symphony Contract
@@ -17,6 +18,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  * The contract also includes reentrancy guard, contract error handling, and ownership functionality.
  */
 contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
+    using SafeERC20 for IERC20;
     using Math for uint;
     event SwapExecuted(
         address indexed user,
@@ -175,7 +177,7 @@ contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
         IERC20 token = IERC20(_token);
         uint256 balance = token.balanceOf(address(this));
 
-        require(token.transfer(_to, balance), "Transfer failed");
+        token.safeTransfer(_to, balance);
     }
 
     /**
@@ -444,14 +446,9 @@ contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
         }
         if (msg.value > 0) {
             weth.deposit{value: msg.value}();
-            totalAmountIn = msg.value;
+            require(totalAmountIn == msg.value, "Invalid Input Amount");            
         } else {
-            if (!token.transferFrom(msg.sender, address(this), totalAmountIn))
-                revert TransferFromFailedError(
-                    msg.sender,
-                    address(this),
-                    totalAmountIn
-                );
+            token.safeTransferFrom(msg.sender, address(this), totalAmountIn);
         } 
         address finalTokenAddress;
         uint finalTokenAmount;
@@ -510,6 +507,11 @@ contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
                 pathFinalTokenAddress = result.token;
                 pathFinalTokenAmount = result.amount;
             }
+            if (i == 0) {
+                finalTokenAddress = pathFinalTokenAddress;
+            } else {
+                require(pathFinalTokenAddress == finalTokenAddress,"Invalid path");
+            }
             finalTokenAddress = pathFinalTokenAddress;
             finalTokenAmount += pathFinalTokenAmount;
         }
@@ -546,13 +548,7 @@ contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
             );
             return amountToTransfer;
         } else {
-            if (!finalToken.transfer(msg.sender, amountToTransfer)) {
-                revert TransferFailedError(
-                    finalTokenAddress,
-                    msg.sender,
-                    amountToTransfer
-                );
-            }
+            finalToken.safeTransfer(msg.sender, amountToTransfer);
             emit PathsExecuted(
                 msg.sender,
                 swapParams,
@@ -586,7 +582,7 @@ contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
                 finalTokenAddress,
                 totalAmountIn,
                 finalTokenAmount,
-                feePercentage,
+                feeData.paramFee,
                 fee,
                 feeData.feeAddress
             );
@@ -607,14 +603,6 @@ contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
             );
         }
         return amountToTransfer;
-    }
-
-    function bytes32ToAddress(bytes32 b) pure internal returns (address) {
-        return address(uint160(uint256(b)));
-    }
-
-    function addressToBytes32(address a) pure internal returns (bytes32) {
-        return bytes32(uint256(uint160(a)));
     }
 
     function checkRouter(uint routerKey) internal view returns (bool) {
