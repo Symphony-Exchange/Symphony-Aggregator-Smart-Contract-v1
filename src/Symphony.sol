@@ -5,8 +5,9 @@ import "./contracts/interfaces/Interfaces.sol";
 import "./contracts/core/ContractErrors.sol";
 import "./contracts/interfaces/IVaultMinimal.sol";
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -17,7 +18,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
  * It provides functions for approving tokens, executing swaps, and handling token transfers.
  * The contract also includes reentrancy guard, contract error handling, and ownership functionality.
  */
-contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
+contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, OwnableUpgradeable {
     using SafeERC20 for IERC20;
     using Math for uint;
     event SwapExecuted(
@@ -46,39 +47,63 @@ contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
     );
 
     IDragonRouter dragonRouter;
-    address public dragonRouterAddress =
-        0xa4cF2F53D1195aDDdE9e4D3aCa54f556895712f2;
+    address public dragonRouterAddress;
     IYakaRouter yakaRouter;
-    address public yakaRouterAddress =
-        0x9f3B1c6b0CDDfE7ADAdd7aadf72273b38eFF0ebC;
+    address public yakaRouterAddress;
     IDonkeRouter donkeRouter;
-    address public donkeRouterAddress =
-        0x6e8D0B4EBe31C334D53ff7EB08722a4941049070;
+    address public donkeRouterAddress;
     IVault jellyVault;
-    address public jellyVaultAddress =
-        0xFB43069f6d0473B85686a85F4Ce4Fc1FD8F00875;
+    address public jellyVaultAddress;
     IUniversalRouter universalRouter;
-    address public universalRouterAddress =
-        0xa683c66045ad16abb1bCE5ad46A64d95f9A25785;
+    address public universalRouterAddress;
     mapping(uint => address) public v3Routers;
-    uint24[] public routerKeys = [6,7];
+    uint24[] public routerKeys;
 
 
     //CHANGE
-    address public fee_address = 0xa2a9dd657D44e46E2d1843B8784eFc3dE3Cf3A57;
+    address public fee_address;
     IWETH public weth;
-    address public wethAddress = 0xE30feDd158A2e3b13e9badaeABaFc5516e95e8C7;
-    uint public feePercentage = 3;
+    address public wethAddress;
+    uint public feePercentage;
 
-    constructor() ReentrancyGuard() Ownable(msg.sender) {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize() public initializer {
+        __Ownable_init(msg.sender);
+        __ReentrancyGuard_init();
+        
+        // Initialize router addresses
+        dragonRouterAddress = 0xa4cF2F53D1195aDDdE9e4D3aCa54f556895712f2;
+        yakaRouterAddress = 0x9f3B1c6b0CDDfE7ADAdd7aadf72273b38eFF0ebC;
+        donkeRouterAddress = 0x6e8D0B4EBe31C334D53ff7EB08722a4941049070;
+        jellyVaultAddress = 0xFB43069f6d0473B85686a85F4Ce4Fc1FD8F00875;
+        universalRouterAddress = 0xa683c66045ad16abb1bCE5ad46A64d95f9A25785;
+        
+        // Initialize router instances
         dragonRouter = IDragonRouter(dragonRouterAddress);
         yakaRouter = IYakaRouter(yakaRouterAddress);
         donkeRouter = IDonkeRouter(donkeRouterAddress);
         jellyVault = IVault(jellyVaultAddress);
         universalRouter = IUniversalRouter(universalRouterAddress);
+        
+        // Initialize V3 routers
         v3Routers[6] = 0x11DA6463D6Cb5a03411Dbf5ab6f6bc3997Ac7428;
-        v3Routers[7] = 0xd1EFe48B71Acd98Db16FcB9E7152B086647Ef544;
+        v3Routers[7] = 0xD8953D7a8643be3687DFDc401204Ec493D5e6d8A;
+        v3Routers[8] = 0xcD0170b4AE0D03a9E7700f5e2234cab357FCbD33;
+        v3Routers[9] = 0xF74eA7AB3CC57AA60BC9C78B880D0192FD30B2B7;
+        v3Routers[10] = 0xd2e1ef8d8BF6D97e62aF3f24E31Bb9ed7689F170;
+
+        // Initialize router keys array
+        routerKeys = [6, 7, 8, 9, 10];
+
+        // Initialize fee and WETH settings
+        fee_address = 0xa2a9dd657D44e46E2d1843B8784eFc3dE3Cf3A57;
+        wethAddress = 0xE30feDd158A2e3b13e9badaeABaFc5516e95e8C7;
         weth = IWETH(wethAddress);
+        feePercentage = 0;
     }
 
     /**
@@ -569,8 +594,8 @@ contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
         uint amountToTransfer;
         uint fee;
         if (feeData.feeAddress != address(0)){
-            fee = (finalTokenAmount * feeData.paramFee) / 1000;
-            uint feeShare = (fee * feeData.feeSharePercentage) / 1000;
+            fee = (finalTokenAmount * feeData.paramFee) / 10000;
+            uint feeShare = (fee * feeData.feeSharePercentage) / 10000;
             amountToTransfer = finalTokenAmount - fee;
             if (!IERC20(finalTokenAddress).transfer(fee_address, fee - feeShare))
                 revert TransferFailedError(finalTokenAddress, fee_address, fee - feeShare );
@@ -587,7 +612,7 @@ contract Symphony is ReentrancyGuard, ContractErrors, Ownable {
                 feeData.feeAddress
             );
         }else {
-            fee = (finalTokenAmount * feePercentage) / 1000;
+            fee = (finalTokenAmount * feePercentage) / 10000;
             amountToTransfer = finalTokenAmount - fee;
             if (!IERC20(finalTokenAddress).transfer(fee_address, fee))
                 revert TransferFailedError(finalTokenAddress, fee_address, fee);
