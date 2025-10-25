@@ -7,6 +7,7 @@ import "./contracts/interfaces/IVaultMinimal.sol";
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -18,7 +19,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
  * It provides functions for approving tokens, executing swaps, and handling token transfers.
  * The contract also includes reentrancy guard, contract error handling, and ownership functionality.
  */
-contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, OwnableUpgradeable {
+contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, OwnableUpgradeable, PausableUpgradeable {
     using SafeERC20 for IERC20;
     using Math for uint;
     event SwapExecuted(
@@ -196,7 +197,7 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
      * @param _token The address of the ERC20 token to be withdrawn.
      * @param _to The address that will receive the tokens.
      */
-    function withdrawTokens(address _token, address _to) external onlyOwner {
+    function withdrawTokens(address _token, address _to) external onlyOwner whenNotPaused {
         require(_to != address(0), "Invalid address");
 
         IERC20 token = IERC20(_token);
@@ -210,7 +211,7 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
      * @dev Only the contract owner can call this function.
      * @param _to The address that will receive the Ether.
      */
-    function withdrawEther(address payable _to) external onlyOwner {
+    function withdrawEther(address payable _to) external onlyOwner whenNotPaused(){
         require(_to != address(0), "Invalid address");
 
         uint256 balance = address(this).balance;
@@ -232,6 +233,8 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         address tokenOut,
         uint amountIn
     ) internal returns (IPool.TokenAmount memory) {
+        _ensureApproval(tokenIn, dragonRouterAddress, amountIn);
+
         address[] memory path = new address[](2);
         path[0] = tokenIn;
         path[1] = tokenOut;
@@ -271,6 +274,8 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         address tokenOut,
         uint amountIn
     ) internal returns (IPool.TokenAmount memory) {
+        _ensureApproval(tokenIn, yakaRouterAddress, amountIn);
+
         route[] memory path = new route[](1);
         path[0] = route({
             from: tokenIn, // Replace with actual address
@@ -278,7 +283,7 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
             stable: false  // Set the boolean value
         });
 
-        
+
         uint deadline = block.timestamp + 20 minutes;
         uint[] memory amounts = yakaRouter.swapExactTokensForTokens(
             amountIn,
@@ -314,6 +319,8 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         address tokenOut,
         uint amountIn
     ) internal returns (IPool.TokenAmount memory) {
+        _ensureApproval(tokenIn, donkeRouterAddress, amountIn);
+
         address[] memory path = new address[](2);
         path[0] = tokenIn;
         path[1] = tokenOut;
@@ -346,7 +353,8 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         bytes32 poolId,
         uint256 amountIn
     ) internal returns (IPool.TokenAmount memory) {
-        
+        _ensureApproval(tokenIn, jellyVaultAddress, amountIn);
+
         IVault.SingleSwap memory singleSwap = IVault.SingleSwap({
             poolId: poolId,
             kind: IVault.SwapKind.GIVEN_IN,
@@ -385,6 +393,8 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         uint256 amountIn,
         uint24 fee
     ) internal returns (IPool.TokenAmount memory) {
+        _ensureApproval(tokenIn, universalRouterAddress, amountIn);
+
         // Prepare the commands for the Universal Router
         IERC20(tokenIn).transfer(address(universalRouter), amountIn);
         bytes memory commands = abi.encodePacked(
@@ -462,7 +472,7 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         uint minTotalAmountOut,
         bool conveth,
         FeeParams memory feeData
-    ) external payable nonReentrant returns (uint) {
+    ) external payable nonReentrant whenNotPaused returns (uint) {
         address tokenG = swapParams[0][0].tokenIn;
         IERC20 token = IERC20(tokenG);
         uint256 totalAmountIn = 0;
@@ -517,6 +527,7 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
                         param.fee
                     );
                 }else if (checkRouter(param.swapType)) {
+                    _ensureApproval(param.tokenIn, v3Routers[param.swapType], amountInCurrent);
                     IUniswapV3SwapRouter uniswapV3SwapRouter = IUniswapV3SwapRouter(v3Routers[param.swapType]);
                     result = uniswapV3ExactInputSingle(
                         uniswapV3SwapRouter,
@@ -632,6 +643,26 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
 
     function checkRouter(uint routerKey) internal view returns (bool) {
         return abi.encodePacked(v3Routers[routerKey]).length > 0 ? true : false;
+    }
+
+    /**
+     * @notice Ensures that the contract has sufficient approval for a spender to spend a specific amount of tokens.
+     * @dev Uses safeIncreaseAllowance to handle tokens that require 0 approval before increasing.
+     * @param token The address of the token to approve.
+     * @param spender The address of the spender (router).
+     * @param amount The amount of tokens needed for the transaction.
+     */
+    function _ensureApproval(address token, address spender, uint256 amount) internal {
+        uint256 currentAllowance = IERC20(token).allowance(address(this), spender);
+
+        if (currentAllowance < amount) {
+            // If there's existing allowance, reset to 0 first (for tokens like USDT)
+            if (currentAllowance > 0) {
+                IERC20(token).safeDecreaseAllowance(spender, currentAllowance);
+            }
+            // Increase allowance to the exact amount needed
+            IERC20(token).safeIncreaseAllowance(spender, amount);
+        }
     }
 
     receive() external payable {}
