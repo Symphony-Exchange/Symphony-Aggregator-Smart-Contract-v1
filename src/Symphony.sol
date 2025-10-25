@@ -557,7 +557,6 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
                 minTotalAmountOut
             );
         IERC20 finalToken = IERC20(finalTokenAddress);
-        // Toplam çıkış hesaplamasından sonra:
         uint amountToTransfer  = _processFee(
             totalAmountIn,
             finalTokenAmount,
