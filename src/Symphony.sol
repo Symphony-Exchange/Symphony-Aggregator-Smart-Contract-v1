@@ -75,6 +75,7 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
     function initialize() public initializer {
         __Ownable_init(msg.sender);
         __ReentrancyGuard_init();
+        __Pausable_init();
         
         // Initialize router addresses
         dragonRouterAddress = 0xa4cF2F53D1195aDDdE9e4D3aCa54f556895712f2;
@@ -107,32 +108,12 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         feePercentage = 0;
     }
 
-    /**
-        routers[6] = 0x11DA6463D6Cb5a03411Dbf5ab6f6bc3997Ac7428;
-        routers[7] = 0xd1EFe48B71Acd98Db16FcB9E7152B086647Ef544;
+    function pause() external onlyOwner {
+        _pause();
     }
-     * @dev Only the contract owner can call this function.
-     * @param tokens Array of token addresses.
-     */
-    function maxApprovals(address[] calldata tokens) external onlyOwner {
-        for (uint i = 0; i < tokens.length; i++) {
-            IERC20 token = IERC20(tokens[i]);
-            if (!token.approve(donkeRouterAddress, type(uint96).max))
-                revert ApprovalFailedError(tokens[i], donkeRouterAddress);
-            if (!token.approve(dragonRouterAddress, type(uint96).max))
-                revert ApprovalFailedError(tokens[i], dragonRouterAddress);
-            if (!token.approve(yakaRouterAddress, type(uint96).max))
-                revert ApprovalFailedError(tokens[i], yakaRouterAddress);
-            if (!token.approve(jellyVaultAddress, type(uint96).max))
-                revert ApprovalFailedError(tokens[i], jellyVaultAddress);
-            if (!token.approve(universalRouterAddress, type(uint96).max))
-                revert ApprovalFailedError(tokens[i], universalRouterAddress);
-            for (uint j = 0; j < routerKeys.length; j++) {
-                if (!token.approve(v3Routers[routerKeys[j]], type(uint96).max))
-                    revert ApprovalFailedError(tokens[i], v3Routers[routerKeys[j]]);
-            }
-            
-        }
+
+    function unpause() external onlyOwner {
+        _unpause();
     }
 
     /**
@@ -211,7 +192,7 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
      * @dev Only the contract owner can call this function.
      * @param _to The address that will receive the Ether.
      */
-    function withdrawEther(address payable _to) external onlyOwner whenNotPaused(){
+    function withdrawEther(address payable _to) external onlyOwner whenNotPaused {
         require(_to != address(0), "Invalid address");
 
         uint256 balance = address(this).balance;
