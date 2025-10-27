@@ -606,7 +606,8 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
 
     /**
      * @notice Ensures that the contract has sufficient approval for a spender to spend a specific amount of tokens.
-     * @dev Uses safeIncreaseAllowance to handle tokens that require 0 approval before increasing.
+     * @dev Uses forceApprove to safely handle all token types, including those like USDT that require 0 approval first.
+     *      forceApprove will attempt direct approval, and if that fails, reset to 0 then approve the target amount.
      * @param token The address of the token to approve.
      * @param spender The address of the spender (router).
      * @param amount The amount of tokens needed for the transaction.
@@ -615,12 +616,7 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         uint256 currentAllowance = IERC20(token).allowance(address(this), spender);
 
         if (currentAllowance < amount) {
-            // If there's existing allowance, reset to 0 first (for tokens like USDT)
-            if (currentAllowance > 0) {
-                IERC20(token).safeDecreaseAllowance(spender, currentAllowance);
-            }
-            // Increase allowance to the exact amount needed
-            IERC20(token).safeIncreaseAllowance(spender, amount);
+            IERC20(token).forceApprove(spender, amount);
         }
     }
 
