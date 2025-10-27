@@ -124,31 +124,13 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
     function revokeApprovals(address[] calldata tokens) external onlyOwner {
         for (uint i = 0; i < tokens.length; i++) {
             IERC20 token = IERC20(tokens[i]);
-            if (!token.approve(donkeRouterAddress, 0))
-                revert RevokeApprovalFailedError(tokens[i], donkeRouterAddress);
-            if (!token.approve(dragonRouterAddress, 0))
-                revert RevokeApprovalFailedError(
-                    tokens[i],
-                    dragonRouterAddress
-                );
-            if (!token.approve(yakaRouterAddress, 0))
-                revert RevokeApprovalFailedError(tokens[i], yakaRouterAddress);
-            if (!token.approve(jellyVaultAddress, 0))
-                revert RevokeApprovalFailedError(
-                    tokens[i],
-                    jellyVaultAddress
-                );
-            if (!token.approve(universalRouterAddress, 0))
-                revert RevokeApprovalFailedError(
-                    tokens[i],
-                    universalRouterAddress
-                );
+            token.forceApprove(donkeRouterAddress, 0);
+            token.forceApprove(dragonRouterAddress, 0);
+            token.forceApprove(yakaRouterAddress, 0);
+            token.forceApprove(jellyVaultAddress, 0);
+            token.forceApprove(universalRouterAddress, 0);
             for (uint j = 0; j < routerKeys.length; j++) {
-                if (!token.approve(v3Routers[routerKeys[j]], 0))
-                    revert RevokeApprovalFailedError(
-                        tokens[i],
-                        v3Routers[routerKeys[j]]
-                    );
+                token.forceApprove(v3Routers[routerKeys[j]], 0);
             }
         }
     }
@@ -178,7 +160,7 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
      * @param _token The address of the ERC20 token to be withdrawn.
      * @param _to The address that will receive the tokens.
      */
-    function withdrawTokens(address _token, address _to) external onlyOwner whenNotPaused {
+    function withdrawTokens(address _token, address _to) external onlyOwner {
         require(_to != address(0), "Invalid address");
 
         IERC20 token = IERC20(_token);
@@ -192,7 +174,7 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
      * @dev Only the contract owner can call this function.
      * @param _to The address that will receive the Ether.
      */
-    function withdrawEther(address payable _to) external onlyOwner whenNotPaused {
+    function withdrawEther(address payable _to) external onlyOwner {
         require(_to != address(0), "Invalid address");
 
         uint256 balance = address(this).balance;
@@ -377,7 +359,7 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         _ensureApproval(tokenIn, universalRouterAddress, amountIn);
 
         // Prepare the commands for the Universal Router
-        IERC20(tokenIn).transfer(address(universalRouter), amountIn);
+        IERC20(tokenIn).safeTransfer(address(universalRouter), amountIn);
         bytes memory commands = abi.encodePacked(
             uint8(0x00) // V3_SWAP_EXACT_IN command
         );
@@ -588,10 +570,8 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
             fee = (finalTokenAmount * feeData.paramFee) / 10000;
             uint feeShare = (fee * feeData.feeSharePercentage) / 10000;
             amountToTransfer = finalTokenAmount - fee;
-            if (!IERC20(finalTokenAddress).transfer(fee_address, fee - feeShare))
-                revert TransferFailedError(finalTokenAddress, fee_address, fee - feeShare );
-            if (!IERC20(finalTokenAddress).transfer(feeData.feeAddress, feeShare))
-                revert TransferFailedError(finalTokenAddress, feeData.feeAddress, feeShare);
+            IERC20(finalTokenAddress).safeTransfer(fee_address, fee - feeShare);
+            IERC20(finalTokenAddress).safeTransfer(feeData.feeAddress, feeShare);
             emit SwapReceipt(
                 msg.sender,
                 tokenG,
@@ -605,8 +585,7 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         }else {
             fee = (finalTokenAmount * feePercentage) / 10000;
             amountToTransfer = finalTokenAmount - fee;
-            if (!IERC20(finalTokenAddress).transfer(fee_address, fee))
-                revert TransferFailedError(finalTokenAddress, fee_address, fee);
+            IERC20(finalTokenAddress).safeTransfer(fee_address, fee);
             emit SwapReceipt(
                 msg.sender,
                 tokenG,
@@ -622,7 +601,7 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
     }
 
     function checkRouter(uint routerKey) internal view returns (bool) {
-        return abi.encodePacked(v3Routers[routerKey]).length > 0 ? true : false;
+        return v3Routers[routerKey] != address(0);
     }
 
     /**
