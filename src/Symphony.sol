@@ -136,6 +136,16 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
     }
 
     /**
+     * @notice Adds a new Uniswap V3 router to the contract.
+     * @dev Only the contract owner can call this function.
+     * @param key The unique key associated with the router.
+     * @param routerAddress The address of the Uniswap V3 router to be added.
+     */
+    function addV3Router(uint key, address routerAddress) external onlyOwner {
+        v3Routers[key] = routerAddress;
+    }
+
+    /**
      * @notice Sets the fee percentage for a particular operation.
      * @dev Only the contract owner can call this function.
      * @param _feePercentage The new fee percentage to be set.
