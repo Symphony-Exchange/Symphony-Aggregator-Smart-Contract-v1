@@ -66,6 +66,8 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
     IWETH public weth;
     address public wethAddress;
     uint public feePercentage;
+    uint public maxFeePercentage;
+    uint public maxFeeShare;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -106,6 +108,9 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         wethAddress = 0xE30feDd158A2e3b13e9badaeABaFc5516e95e8C7;
         weth = IWETH(wethAddress);
         feePercentage = 0;
+
+        maxFeePercentage = 1000; // 10%
+        maxFeeShare = 9000; // 90%
     }
 
     function pause() external onlyOwner {
@@ -146,11 +151,21 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
     }
 
     /**
+     * @notice Sets the router keys used for V3 routers.
+     * @dev Only the contract owner can call this function.
+     * @param keys Array of router keys.
+     */
+    function setRouterKeys(uint24[] calldata keys) external onlyOwner {
+        routerKeys = keys;
+    }
+
+    /**
      * @notice Sets the fee percentage for a particular operation.
      * @dev Only the contract owner can call this function.
      * @param _feePercentage The new fee percentage to be set.
      */
     function setFeePercentage(uint _feePercentage) external onlyOwner {
+        require(_feePercentage <= maxFeePercentage, "Fee percentage exceeds maximum");
         feePercentage = _feePercentage;
     }
 
@@ -366,8 +381,6 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         uint256 amountIn,
         uint24 fee
     ) internal returns (IPool.TokenAmount memory) {
-        _ensureApproval(tokenIn, universalRouterAddress, amountIn);
-
         // Prepare the commands for the Universal Router
         IERC20(tokenIn).safeTransfer(address(universalRouter), amountIn);
         bytes memory commands = abi.encodePacked(
@@ -450,9 +463,11 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         IERC20 token = IERC20(tokenG);
         uint256 totalAmountIn = 0;
         for (uint i = 0; i < swapParams.length; i++){
+            require(swapParams[i][0].tokenIn == tokenG, "All input tokens must be the same");
             totalAmountIn += swapParams[i][0].amountIn;
         }
         if (msg.value > 0) {
+            require(swapParams[0][0].tokenIn == address(weth), "Input token must be wrapped native token");
             weth.deposit{value: msg.value}();
             require(totalAmountIn == msg.value, "Invalid Input Amount");            
         } else {
@@ -465,6 +480,9 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
             address pathFinalTokenAddress;
             uint pathFinalTokenAmount;
             for (uint j = 0; j < swapParams[i].length; j++) {
+                if(j < swapParams[i].length - 1){
+                    require(swapParams[i][j].tokenOut == swapParams[i][j+1].tokenIn, "Invalid path");
+                }
                 Params.SwapParam memory param = swapParams[i][j];
                 IPool.TokenAmount memory result;
                 if (param.swapType == 1) {
@@ -577,6 +595,10 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         uint amountToTransfer;
         uint fee;
         if (feeData.feeAddress != address(0)){
+            require(feeData.paramFee <= maxFeePercentage, "Fee percentage exceeds maximum"); // at most 10% fee
+            require(feeData.feeSharePercentage <= maxFeeShare, "Fee share percentage exceeds maximum"); // at least 10% must go to protocol
+            require(feeData.paramFee * ( 10000 - feeData.feeSharePercentage) / 10000 >= feePercentage, "Invalid fee paramFee"); //protocol fee must be covered
+
             fee = (finalTokenAmount * feeData.paramFee) / 10000;
             uint feeShare = (fee * feeData.feeSharePercentage) / 10000;
             amountToTransfer = finalTokenAmount - fee;
