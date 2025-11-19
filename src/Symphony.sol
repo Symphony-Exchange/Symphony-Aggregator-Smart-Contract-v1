@@ -66,8 +66,8 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
     IWETH public weth;
     address public wethAddress;
     uint public feePercentage;
-    uint public maxFeePercentage;
-    uint public maxFeeShare;
+    uint public maxPartnerFeePercentage;
+    uint public maxPartnerFeeSharePercentage;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -109,8 +109,8 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         weth = IWETH(wethAddress);
         feePercentage = 0;
 
-        maxFeePercentage = 1000; // 10%
-        maxFeeShare = 9000; // 90%
+        maxPartnerFeePercentage = 1000; // 10%
+        maxPartnerFeeSharePercentage = 9000; // 90%
     }
 
     function pause() external onlyOwner {
@@ -165,8 +165,25 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
      * @param _feePercentage The new fee percentage to be set.
      */
     function setFeePercentage(uint _feePercentage) external onlyOwner {
-        require(_feePercentage <= maxFeePercentage, "Fee percentage exceeds maximum");
         feePercentage = _feePercentage;
+    }
+
+    /**
+     * @notice Sets the maximum partner fee percentage.
+     * @dev Only the contract owner can call this function.
+     * @param _maxPartnerFeePercentage The new maximum partner fee percentage to be set.
+     */
+    function setMaxPartnerFeePercentage(uint _maxPartnerFeePercentage) external onlyOwner {
+        maxPartnerFeePercentage = _maxPartnerFeePercentage;
+    }
+
+    /**
+     * @notice Sets the maximum partner fee share percentage.
+     * @dev Only the contract owner can call this function.
+     * @param _maxPartnerFeeSharePercentage The new maximum partner fee share percentage to be set.
+     */
+    function setMaxPartnerFeeSharePercentage(uint _maxPartnerFeeSharePercentage) external onlyOwner {
+        maxPartnerFeeSharePercentage = _maxPartnerFeeSharePercentage;
     }
 
     /**
@@ -595,8 +612,8 @@ contract Symphony is Initializable, ReentrancyGuardUpgradeable, ContractErrors, 
         uint amountToTransfer;
         uint fee;
         if (feeData.feeAddress != address(0)){
-            require(feeData.paramFee <= maxFeePercentage, "Fee percentage exceeds maximum"); // at most 10% fee
-            require(feeData.feeSharePercentage <= maxFeeShare, "Fee share percentage exceeds maximum"); // at least 10% must go to protocol
+            require(feeData.paramFee <= maxPartnerFeePercentage, "Fee percentage exceeds maximum"); // at most 10% fee
+            require(feeData.feeSharePercentage <= maxPartnerFeeSharePercentage, "Fee share percentage exceeds maximum"); // at least 10% must go to protocol
             require(feeData.paramFee * ( 10000 - feeData.feeSharePercentage) / 10000 >= feePercentage, "Invalid fee paramFee"); //protocol fee must be covered
 
             fee = (finalTokenAmount * feeData.paramFee) / 10000;
